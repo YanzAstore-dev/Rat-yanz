@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parental Control Pro - Real System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0a0e27;
+            min-height: 100vh;
+        }
+        .glass {
+            background: rgba(255,255,255,0.05);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .glow {
+            box-shadow: 0 0 30px rgba(59, 130, 246, 0.3);
+        }
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        @keyframes slideIn {
+            from { transform: translateY(-100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .notification {
+            animation: slideIn 0.5s ease-out;
+        }
+        #remoteVideo {
+            width: 100%;
+            max-width: 500px;
+            border-radius: 16px;
+            background: #000;
+            display: none;
+        }
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-dot.online { background: #22c55e; animation: pulse 2s infinite; }
+        .status-dot.offline { background: #ef4444; }
+        .status-dot.waiting { background: #eab308; animation: pulse 1.5s infinite; }
+        .status-dot.connected { background: #3b82f6; animation: pulse 1s infinite; }
+        
+        .lock-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.95);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(20px);
+        }
+        .lock-overlay.active { display: flex; }
+        
+        .pin-dot {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            margin: 0 8px;
+            transition: all 0.3s;
+        }
+        .pin-dot.filled {
+            background: #22c55e;
+            box-shadow: 0 0 20px #22c55e;
+        }
+        
+        .keypad-btn {
+            width: 72px;
+            height: 72px;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.1);
+            background: rgba(255,255,255,0.05);
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            transition: all 0.2s;
+            cursor: pointer;
+        }
+        .keypad-btn:hover {
+            background: rgba(255,255,255,0.15);
+            transform: scale(1.05);
+        }
+        .keypad-btn:active {
+            transform: scale(0.95);
+        }
+        .keypad-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        #activityLog {
+            max-height: 300px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+        }
+        #activityLog::-webkit-scrollbar {
+            width: 4px;
+        }
+        #activityLog::-webkit-scrollbar-thumb {
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+        }
+        
+        .tab {
+            padding: 10px 20px;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 1px solid transparent;
+        }
+        .tab.active {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: #3b82f6;
+        }
+        .tab:hover {
+            background: rgba(255,255,255,0.05);
+        }
+        
+        .connection-card {
+            border: 2px solid rgba(255,255,255,0.05);
+            transition: all 0.3s;
+        }
+        .connection-card:hover {
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        
+        .device-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+        .device-badge.parent { background: #3b82f6; color: white; }
+        .device-badge.child { background: #22c55e; color: white; }
+        .device-badge.unknown { background: #6b7280; color: white; }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            background: rgba(0,0,0,0.9);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.1);
+            color: white;
+            z-index: 10000;
+            max-width: 400px;
+            animation: slideIn 0.5s ease-out;
+            display: none;
+        }
+        .toast.success { border-color: #22c55e; }
+        .toast.error { border-color: #ef4444; }
+        .toast.warning { border-color: #eab308; }
+    </style>
+</head>
+<body>
+
+    <!-- ===== TOAST NOTIFICATION ===== -->
+    <div id="toast" class="toast"></div>
+
+    <!-- ===== LOCK SCREEN OVERLAY ===== -->
+    <div id="lockOverlay" class="lock-overlay">
+        <div class="text-center p-8 max-w-md w-full">
+            <div class="mb-8">
+                <div class="text-6xl mb-4">🔒</div>
+                <h2 class="text-3xl font-bold text-white mb-2">Device Locked</h2>
+                <p class="text-gray-400 text-sm">Masukkan PIN untuk membuka</p>
+            </div>
+            
+            <div class="flex justify-center mb-8" id="pinDisplay">
+                <span class="pin-dot" id="pin1"></span>
+                <span class="pin-dot" id="pin2"></span>
+                <span class="pin-dot" id="pin3"></span>
+                <span class="pin-dot" id="pin4"></span>
+            </div>
+            
+            <div class="grid grid-cols-3 gap-4 max-w-xs mx-auto">
+                <button class="keypad-btn" onclick="pressPin(1)">1</button>
+                <button class="keypad-btn" onclick="pressPin(2)">2</button>
+                <button class="keypad-btn" onclick="pressPin(3)">3</button>
+                <button class="keypad-btn" onclick="pressPin(4)">4</button>
+                <button class="keypad-btn" onclick="pressPin(5)">5</button>
+                <button class="keypad-btn" onclick="pressPin(6)">6</button>
+                <button class="keypad-btn" onclick="pressPin(7)">7</button>
+                <button class="keypad-btn" onclick="pressPin(8)">8</button>
+                <button class="keypad-btn" onclick="pressPin(9)">9</button>
+                <button class="keypad-btn" onclick="clearPin()">⌫</button>
+                <button class="keypad-btn" onclick="pressPin(0)">0</button>
+                <button class="keypad-btn" onclick="submitPin()" style="background:#3b82f6;">✓</button>
+            </div>
+            
+            <p id="pinError" class="text-red-400 text-sm mt-4 hidden">PIN salah! Coba lagi.</p>
+            <p class="text-gray-500 text-xs mt-4">Hubungi orang tua untuk PIN</p>
+        </div>
+    </div>
+
+    <!-- ===== MAIN DASHBOARD ===== -->
+    <div class="container mx-auto px-4 py-6 max-w-6xl">
+        <!-- Header -->
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-white">👨‍👩‍👦 Parental Control</h1>
+                <p class="text-gray-400 text-sm">Real-time monitoring system - Vercel Ready</p>
+            </div>
+            <div class="flex items-center gap-4 flex-wrap">
+                <span class="text-xs text-gray-500">Device ID:</span>
+                <span class="text-white font-mono text-sm bg-white/5 px-3 py-1 rounded-lg" id="deviceIdDisplay">-</span>
+                <span class="status-dot" id="connectionStatus"></span>
+                <span id="statusText" class="text-sm text-gray-400">Offline</span>
+                <span class="device-badge" id="deviceBadge">unknown</span>
+            </div>
+        </header>
+
+        <!-- Connection Section -->
+        <div class="glass p-6 rounded-2xl mb-6 connection-card">
+            <div class="flex flex-col md:flex-row items-center gap-4">
+                <div class="flex-1 w-full">
+                    <label class="text-gray-400 text-sm block mb-2">🔑 Kode Koneksi (masukkan di perangkat anak)</label>
+                    <div class="flex gap-2">
+                        <input type="text" id="connectionCode" value="98006937" readonly 
+                               class="flex-1 p-3 rounded-xl bg-white/5 border border-white/10 text-white font-mono text-lg text-center">
+                        <button onclick="copyConnectionCode()" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-xl text-sm font-bold transition">
+                            📋 Copy
+                        </button>
+                        <button onclick="regenerateCode()" class="bg-gray-500 hover:bg-gray-600 px-4 py-2 rounded-xl text-sm font-bold transition">
+                            🔄
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">Anak harus memasukkan kode ini di perangkat mereka untuk terkoneksi</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="connectToChild()" class="bg-green-500 hover:bg-green-600 px-6 py-3 rounded-xl font-bold transition">
+                        📱 Connect to Child
+                    </button>
+                    <button onclick="disconnectDevice()" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-6 py-3 rounded-xl font-bold transition">
+                        ⛔ Disconnect
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="glass p-4 rounded-2xl">
+                <div class="text-gray-400 text-xs">Status</div>
+                <div class="text-white font-bold" id="deviceStatus">Tidak Terhubung</div>
+            </div>
+            <div class="glass p-4 rounded-2xl">
+                <div class="text-gray-400 text-xs">Lock Status</div>
+                <div class="text-white font-bold" id="lockStatus">🔓 Terbuka</div>
+            </div>
+            <div class="glass p-4 rounded-2xl">
+                <div class="text-gray-400 text-xs">Camera</div>
+                <div class="text-white font-bold" id="cameraStatusText">📷 Tidak Aktif</div>
+            </div>
+            <div class="glass p-4 rounded-2xl">
+                <div class="text-gray-400 text-xs">Device Info</div>
+                <div class="text-white font-bold text-sm" id="deviceInfoText">-</div>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="flex gap-2 mb-6 overflow-x-auto pb-2">
+            <div class="tab active" onclick="switchTab('dashboard')">📊 Dashboard</div>
+            <div class="tab" onclick="switchTab('camera')">📷 Kamera</div>
+            <div class="tab" onclick="switchTab('control')">🎮 Kontrol</div>
+            <div class="tab" onclick="switchTab('settings')">⚙️ Settings</div>
+        </div>
+
+        <!-- ===== TAB 1: DASHBOARD ===== -->
+        <div id="tab-dashboard" class="tab-content">
+            <div class="glass p-6 rounded-2xl">
+                <h3 class="text-white font-bold mb-4">📋 Activity Log</h3>
+                <div id="activityLog" class="space-y-2"></div>
+            </div>
+        </div>
+
+        <!-- ===== TAB 2: CAMERA ===== -->
+        <div id="tab-camera" class="tab-content hidden">
+            <div class="glass p-6 rounded-2xl">
+                <div class="flex flex-col md:flex-row items-center justify-between mb-4 gap-2">
+                    <h3 class="text-white font-bold">📷 Live Camera Feed</h3>
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="startCameraStream()" class="bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-xl text-sm font-bold transition">
+                            ▶️ Start Stream
+                        </button>
+                        <button onclick="stopCameraStream()" class="bg-red-500 hover:bg-red-600 px-4 py-2 rounded-xl text-sm font-bold transition">
+                            ⏹ Stop
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="bg-black rounded-2xl overflow-hidden flex items-center justify-center min-h-[400px]">
+                    <video id="remoteVideo" autoplay playsinline></video>
+                    <div id="cameraPlaceholder" class="text-gray-500 text-center p-8">
+                        <div class="text-6xl mb-4">📷</div>
+                        <p>Kamera tidak aktif</p>
+                        <p class="text-xs mt-2">Klik "Start Stream" untuk memulai</p>
+                    </div>
+                </div>
+                
+                <div class="mt-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl">
+                    <p class="text-yellow-300 text-sm">⚠️ Anak akan menerima notifikasi dan harus menyetujui akses kamera</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB 3: CONTROL ===== -->
+        <div id="tab-control" class="tab-content hidden">
+            <div class="grid md:grid-cols-2 gap-6">
+                <div class="glass p-6 rounded-2xl">
+                    <h3 class="text-white font-bold mb-4">🔒 Lock Control</h3>
+                    <button onclick="sendLockCommand()" class="w-full bg-red-500 hover:bg-red-600 py-3 rounded-xl font-bold transition">
+                        🔒 Lock Device
+                    </button>
+                    <button onclick="sendUnlockCommand()" class="w-full bg-green-500 hover:bg-green-600 py-3 rounded-xl font-bold transition mt-3">
+                        🔓 Unlock Device
+                    </button>
+                    <div class="mt-4 p-3 bg-blue-500/10 rounded-xl text-xs text-gray-400">
+                        PIN default: <span class="text-white font-mono">1234</span>
+                    </div>
+                </div>
+                
+                <div class="glass p-6 rounded-2xl">
+                    <h3 class="text-white font-bold mb-4">📱 Connected Device Info</h3>
+                    <div class="space-y-2 text-sm" id="deviceInfoPanel">
+                        <div class="flex justify-between border-b border-white/5 pb-2">
+                            <span class="text-gray-400">Device Name</span>
+                            <span class="text-white" id="infoDeviceName">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-white/5 pb-2">
+                            <span class="text-gray-400">Browser</span>
+                            <span class="text-white" id="infoBrowser">-</span>
+                        </div>
+                        <div class="flex justify-between border-b border-white/5 pb-2">
+                            <span class="text-gray-400">Screen Size</span>
+                            <span class="text-white" id="infoScreen">-</span>
+                        </div>
+                        <div class="flex justify-between">
+                            <span class="text-gray-400">Battery</span>
+                            <span class="text-white" id="infoBattery">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB 4: SETTINGS ===== -->
+        <div id="tab-settings" class="tab-content hidden">
+            <div class="glass p-6 rounded-2xl max-w-2xl">
+                <h3 class="text-white font-bold mb-4">⚙️ Pengaturan</h3>
+                <div class="space-y-4">
+                    <div>
+                        <label class="text-gray-400 text-sm block mb-2">PIN Lock (default: 1234)</label>
+                        <input type="password" id="settingsPin" value="1234" class="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-white" maxlength="4">
+                        <button onclick="updatePin()" class="mt-2 bg-blue-500 hover:bg-blue-600 px-4 py-2 rounded-xl text-sm font-bold transition">
+                            Update PIN
+                        </button>
+                    </div>
+                    
+                    <div>
+                        <label class="text-gray-400 text-sm block mb-2">Connection Code</label>
+                        <input type="text" id="settingsCode" class="w-full p-3 rounded-xl bg-white/5 border border-white/10 text-white font-mono" readonly>
+                    </div>
+                    
+                    <div class="border-t border-white/10 pt-4">
+                        <button onclick="resetAll()" class="bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-xl text-sm font-bold transition">
+                            🗑 Reset All Data
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============================================
+        // ===== PARENTAL CONTROL SYSTEM - REAL =====
+        // ============================================
+
+        // ---------- STATE ----------
+        const state = {
+            isLocked: false,
+            isCameraActive: false,
+            pin: '1234',
+            connectionCode: '98006937',
+            deviceId: 'PC-' + Math.random().toString(36).substr(2, 8).toUpperCase(),
+            peer: null,
+            connection: null,
+            stream: null,
+            log: [],
+            isParent: true,
+            connectedDeviceId: null,
+            connectionAttempts: 0,
+            isConnecting: false
+        };
+
+        // ---------- DOM REFS ----------
+        const $ = id => document.getElementById(id);
+        const lockOverlay = $('lockOverlay');
+        const remoteVideo = $('remoteVideo');
+        const cameraPlaceholder = $('cameraPlaceholder');
+        const activityLog = $('activityLog');
+        const toast = $('toast');
+
+        // ---------- INIT ----------
+        function init() {
+            loadState();
+            updateUI();
+            setupPeerJS();
+            setupBatteryInfo();
+            
+            // Check URL params for child mode
+            const params = new URLSearchParams(window.location.search);
+            const childMode = params.get('mode') === 'child';
+            const code = params.get('code');
+            
+            if (childMode && code) {
+                state.isParent = false;
+                $('deviceBadge').textContent = 'child';
+                $('deviceBadge').className = 'device-badge child';
+                addLog('📱 Child mode activated', 'info');
+                addLog(`🔑 Connecting with code: ${code}`, 'info');
+                // Auto connect to parent
+                setTimeout(() => connectToParent(code), 1000);
+            } else if (childMode) {
+                // Child mode without code - show connection dialog
+                showConnectionDialog();
+            } else {
+                // Parent mode
+                $('deviceBadge').textContent = 'parent';
+                $('deviceBadge').className = 'device-badge parent';
+                addLog('👨‍👩‍👦 Parent mode activated', 'success');
+                addLog(`🔑 Connection Code: ${state.connectionCode}`, 'info');
+                addLog('💡 Berikan kode ini ke anak untuk koneksi', 'info');
+            }
+            
+            // Listen for connection requests
+            setupConnectionListener();
+        }
+
+        // ---------- LOCAL STORAGE ----------
+        function loadState() {
+            try {
+                const saved = localStorage.getItem('parentalControlState');
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    state.pin = data.pin || '1234';
+                    state.connectionCode = data.connectionCode || '98006937';
+                    state.deviceId = data.deviceId || state.deviceId;
+                    state.isLocked = data.isLocked || false;
+                }
+            } catch(e) {}
+        }
+
+        function saveState() {
+            try {
+                localStorage.setItem('parentalControlState', JSON.stringify({
+                    pin: state.pin,
+                    connectionCode: state.connectionCode,
+                    deviceId: state.deviceId,
+                    isLocked: state.isLocked
+                }));
+            } catch(e) {}
+        }
+
+        // ---------- PEERJS SETUP ----------
+        function setupPeerJS() {
+            if (state.peer) {
+                state.peer.destroy();
+            }
+            
+            const peer = new Peer(state.deviceId, {
+                debug: 2,
+                config: {
+                    'iceServers': [
+                        { 'urls': 'stun:stun.l.google.com:19302' },
+                        { 'urls': 'stun:stun1.l.google.com:19302' },
+                        { 'urls': 'stun:stun2.l.google.com:19302' }
+                    ]
+                }
+            });
+
+            peer.on('open', (id) => {
+                state.peer = peer;
+                $('deviceIdDisplay').textContent = id;
+                $('settingsCode').value = state.connectionCode;
+                addLog(`✅ PeerJS connected: ${id}`, 'success');
+                updateUI();
+                
+                // If child mode, auto connect
+                if (!state.isParent && state.connectionCode) {
+                    connectToParent(state.connectionCode);
+                }
+            });
+
+            peer.on('connection', (conn) => {
+                addLog(`📡 Incoming connection from: ${conn.peer}`, 'info');
+                handleIncomingConnection(conn);
+            });
+
+            peer.on('error', (err) => {
+                addLog(`❌ PeerJS error: ${err.type}`, 'warning');
+                if (err.type === 'unavailable-id') {
+                    regenerateDeviceId();
+                }
+            });
+
+            state.peer = peer;
+        }
+
+        // ---------- CONNECTION HANDLING ----------
+        function setupConnectionListener() {
+            // Listen for connection requests from child
+            if (state.isParent) {
+                // Parent waits for child connections
+                addLog('📡 Menunggu koneksi dari anak...', 'info');
+            }
+        }
+
+        function handleIncomingConnection(conn) {
+            state.connection = conn;
+            state.connectedDeviceId = conn.peer;
+            
+            conn.on('data', (data) => {
+                handleCommand(data);
+            });
+
+            conn.on('close', () => {
+                addLog('🔌 Connection closed', 'warning');
+                state.connection = null;
+                state.connectedDeviceId = null;
+                updateUI();
+                showToast('Koneksi terputus', 'warning');
+            });
+
+            // Send device info
+            conn.send({
+                type: 'deviceInfo',
+                data: {
+                    name: navigator.userAgent.split('(')[0].trim(),
+                    browser: navigator.userAgent,
+                    screen: `${window.screen.width}x${window.screen.height}`,
+                    timestamp: Date.now(),
+                    isParent: state.isParent,
+                    deviceId: state.deviceId
+                }
+            });
+
+            addLog(`✅ Connected to: ${conn.peer}`, 'success');
+            updateUI();
+            showToast(`Terhubung dengan ${conn.peer}`, 'success');
+            
+            // If device is locked, send lock status
+            if (state.isLocked) {
+                conn.send({ type: 'lockStatus', status: 'locked' });
+            }
+        }
+
+        function connectToParent(code) {
+            if (!state.peer) {
+                addLog('❌ Peer not initialized', 'warning');
+                return;
+            }
+            
+            if (state.isConnecting) {
+                addLog('⏳ Already connecting...', 'warning');
+                return;
+            }
+            
+            state.isConnecting = true;
+            addLog(`🔗 Connecting to parent with code: ${code}`, 'info');
+            
+            // Try to connect using the code as device ID
+            const conn = state.peer.connect(code, {
+                reliable: true
+            });
+            
+            conn.on('open', () => {
+                state.connection = conn;
+                state.connectedDeviceId = code;
+                state.isConnecting = false;
+                addLog(`✅ Connected to parent: ${code}`, 'success');
+                updateUI();
+                showToast('Terhubung ke orang tua!', 'success');
+                
+                // Send device info
+                conn.send({
+                    type: 'deviceInfo',
+                    data: {
+                        name: navigator.userAgent.split('(')[0].trim(),
+                        browser: navigator.userAgent,
+                        screen: `${window.screen.width}x${window.screen.height}`,
+                        timestamp: Date.now(),
+                        isParent: state.isParent,
+                        deviceId: state.deviceId
+                    }
+                });
+            });
+            
+            conn.on('error', (err) => {
+                state.isConnecting = false;
+                addLog(`❌ Connection failed: ${err.message}`, 'warning');
+                showToast('Gagal terhubung. Pastikan orang tua online.', 'error');
+                updateUI();
+            });
+        }
+
+        function connectToChild() {
+            if (!state.isParent) {
+                showToast('Hanya parent mode yang bisa connect ke child', 'warning');
+                return;
+            }
+            
+            const code = prompt('Masukkan Device ID anak:');
+            if (!code) return;
+            
+            if (!state.peer) {
+                addLog('❌ Peer not initialized', 'warning');
+                return;
+            }
+            
+            addLog(`🔗 Connecting to child: ${code}`, 'info');
+            
+            const conn = state.peer.connect(code, {
+                reliable: true
+            });
+            
+            conn.on('open', () => {
+                state.connection = conn;
+                state.connectedDeviceId = code;
+                addLog(`✅ Connected to child: ${code}`, 'success');
+                updateUI();
+                showToast('Terhubung ke anak!', 'success');
+                
+                conn.send({
+                    type: 'deviceInfo',
+                    data: {
+                        name: 'Parent Device',
+                        browser: navigator.userAgent,
+                        screen: `${window.screen.width}x${window.screen.height}`,
+                        timestamp: Date.now(),
+                        isParent: true,
+                        deviceId: state.deviceId
+                    }
+                });
+            });
+            
+            conn.on('error', (err) => {
+                addLog(`❌ Connection failed: ${err.message}`, 'warning');
+                showToast('Gagal terhubung ke anak', 'error');
+                updateUI();
+            });
+        }
+
+        function disconnectDevice() {
+            if (state.connection) {
+                state.connection.close();
+                state.connection = null;
+                state.connectedDeviceId = null;
+                addLog('🔌 Disconnected', 'info');
+                updateUI();
+                showToast('Terputus', 'warning');
+            }
+        }
+
+        // ---------- COMMANDS ----------
+        function handleCommand(data) {
+            switch(data.type) {
+                case 'lock':
+                    lockDevice();
+                    break;
+                case 'unlock':
+                    unlockDevice();
+                    break;
+                case 'cameraRequest':
+                    requestCameraAccess();
+                    break;
+                case 'cameraStop':
+                    stopCameraStream();
+                    break;
+                case 'deviceInfo':
+                    updateDeviceInfo(data.data);
+                    break;
+                case 'lockStatus':
+                    state.isLocked = data.status === 'locked';
+                    updateUI();
+                    saveState();
+                    break;
+                case 'cameraStatus':
+                    state.isCameraActive = data.status === 'active';
+                    updateUI();
+                    break;
+                default:
+                    addLog(`⚠️ Unknown command: ${data.type}`, 'warning');
+            }
+        }
+
+        // ---------- LOCK FUNCTIONS ----------
+        function lockDevice() {
+            state.isLocked = true;
+            lockOverlay.classList.add('active');
+            addLog('🔒 Device locked by parent', 'warning');
+            saveState();
+            updateUI();
+            
+            if (state.connection) {
+                state.connection.send({ type: 'lockAck', status: 'locked' });
+            }
+            showToast('🔒 Device terkunci', 'warning');
+        }
+
+        function unlockDevice() {
+            state.isLocked = false;
+            lockOverlay.classList.remove('active');
+            addLog('🔓 Device unlocked', 'success');
+            saveState();
+            updateUI();
+            
+            if (state.connection) {
+                state.connection.send({ type: 'unlockAck', status: 'unlocked' });
+            }
+            showToast('🔓 Device terbuka', 'success');
+        }
+
+        function sendLockCommand() {
+            if (!state.connection) {
+                addLog('❌ No device connected', 'warning');
+                showToast('Tidak ada perangkat terhubung', 'error');
+                return;
+            }
+            state.connection.send({ type: 'lock' });
+            addLog('📤 Sent: Lock command', 'info');
+            showToast('📤 Mengirim perintah lock...', 'info');
+        }
+
+        function sendUnlockCommand() {
+            if (!state.connection) {
+                addLog('❌ No device connected', 'warning');
+                showToast('Tidak ada perangkat terhubung', 'error');
+                return;
+            }
+            state.connection.send({ type: 'unlock' });
+            addLog('📤 Sent: Unlock command', 'info');
+            showToast('📤 Mengirim perintah unlock...', 'info');
+        }
+
+        // ---------- PIN ----------
+        let pinInput = '';
+
+        function pressPin(num) {
+            if (pinInput.length >= 4) return;
+            pinInput += num;
+            updatePinDisplay();
+            document.getElementById('pinError').classList.add('hidden');
+        }
+
+        function clearPin() {
+            pinInput = pinInput.slice(0, -1);
+            updatePinDisplay();
+        }
+
+        function submitPin() {
+            if (pinInput.length !== 4) return;
+            
+            if (pinInput === state.pin) {
+                unlockDevice();
+                pinInput = '';
+                updatePinDisplay();
+                addLog('✅ PIN correct - device unlocked', 'success');
+            } else {
+                document.getElementById('pinError').classList.remove('hidden');
+                pinInput = '';
+                updatePinDisplay();
+                addLog('❌ Wrong PIN attempt', 'warning');
+                showToast('❌ PIN salah!', 'error');
+            }
+        }
+
+        function updatePinDisplay() {
+            for (let i = 1; i <= 4; i++) {
+                const dot = document.getElementById(`pin${i}`);
+                dot.className = `pin-dot ${i <= pinInput.length ? 'filled' : ''}`;
+            }
+        }
+
+        // ---------- CAMERA ----------
+        async function requestCameraAccess() {
+            if (state.isCameraActive) {
+                addLog('📷 Camera already active', 'warning');
+                return;
+            }
+
+            // Show notification to child
+            if (!state.isParent) {
+                const confirm = window.confirm(
+                    '📷 Orang tua meminta akses kamera Anda.\n\n' +
+                    'Apakah Anda mengizinkan?'
+                );
+                if (!confirm) {
+                    addLog('❌ Child denied camera access', 'warning');
+                    if (state.connection) {
+                        state.connection.send({ type: 'cameraDenied' });
+                    }
+                    return;
+                }
+            }
+
+            try {
+                addLog('📷 Requesting camera access...', 'info');
+                
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'user',
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+
+                state.stream = stream;
+                state.isCameraActive = true;
+                
+                remoteVideo.srcObject = stream;
+                remoteVideo.style.display = 'block';
+                cameraPlaceholder.style.display = 'none';
+                
+                addLog('✅ Camera access granted', 'success');
+                updateUI();
+                showToast('📷 Kamera aktif', 'success');
+
+                // Send camera status to parent
+                if (state.connection) {
+                    state.connection.send({
+                        type: 'cameraStatus',
+                        status: 'active',
+                        timestamp: Date.now()
+                    });
+                }
+
+            } catch (error) {
+                addLog(`❌ Camera error: ${error.message}`, 'warning');
+                if (error.name === 'NotAllowedError') {
+                    addLog('❌ User denied camera permission', 'warning');
+                    showToast('❌ Izin kamera ditolak', 'error');
+                }
+                updateUI();
+            }
+        }
+
+        function stopCameraStream() {
+            if (state.stream) {
+                state.stream.getTracks().forEach(track => track.stop());
+                state.stream = null;
+            }
+            state.isCameraActive = false;
+            remoteVideo.style.display = 'none';
+            cameraPlaceholder.style.display = 'block';
+            addLog('📷 Camera stopped', 'info');
+            updateUI();
+            showToast('📷 Kamera dimatikan', 'info');
+            
+            if (state.connection) {
+                state.connection.send({ type: 'cameraStopped' });
+            }
+        }
+
+        function startCameraStream() {
+            if (state.isCameraActive) {
+                addLog('📷 Camera already streaming', 'warning');
+                return;
+            }
+            
+            if (!state.connection) {
+                showToast('Tidak ada perangkat terhubung', 'error');
+                return;
+            }
+            
+            if (state.isParent) {
+                // Parent requests child's camera
+                state.connection.send({ type: 'cameraRequest' });
+                addLog('📤 Requesting child camera access', 'info');
+                showToast('📤 Meminta akses kamera anak...', 'info');
+            } else {
+                // Child starts own camera
+                requestCameraAccess();
+            }
+        }
+
+        // ---------- CONNECTION CODE ----------
+        function copyConnectionCode() {
+            const code = $('connectionCode');
+            code.select();
+            document.execCommand('copy');
+            showToast('✅ Kode disalin!', 'success');
+            addLog('📋 Connection code copied', 'info');
+        }
+
+        function regenerateCode() {
+            const newCode = Math.floor(10000000 + Math.random() * 90000000).toString();
+            state.connectionCode = newCode;
+            $('connectionCode').value = newCode;
+            $('settingsCode').value = newCode;
+            saveState();
+            addLog(`🔄 Connection code regenerated: ${newCode}`, 'info');
+            showToast('🔄 Kode baru dibuat!', 'success');
+        }
+
+        function regenerateDeviceId() {
+            const newId = 'PC-' + Math.random().toString(36).substr(2, 8).toUpperCase();
+            state.deviceId = newId;
+            saveState();
+            updateUI();
+            addLog(`🔄 Device ID changed to: ${newId}`, 'info');
+            
+            // Reconnect PeerJS
+            if (state.peer) {
+                state.peer.destroy();
+            }
+            setupPeerJS();
+        }
+
+        // ---------- UI UPDATE ----------
+        function updateUI() {
+            $('deviceIdDisplay').textContent = state.deviceId;
+            $('settingsCode').value = state.connectionCode;
+            $('lockStatus').textContent = state.isLocked ? '🔒 Terkunci' : '🔓 Terbuka';
+            $('deviceStatus').textContent = state.connection ? 'Terhubung' : 'Tidak Terhubung';
+            $('cameraStatusText').textContent = state.isCameraActive ? '📷 Aktif' : '📷 Tidak Aktif';
+            
+            const statusDot = $('connectionStatus');
+            const statusText = $('statusText');
+            if (state.connection) {
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = `Online (${state.connectedDeviceId})`;
+            } else if (state.isConnecting) {
+                statusDot.className = 'status-dot waiting';
+                statusText.textContent = 'Connecting...';
+            } else {
+                statusDot.className = 'status-dot offline';
+                statusText.textContent = 'Offline';
+            }
+            
+            $('connectionCode').value = state.connectionCode;
+        }
+
+        // ---------- DEVICE INFO ----------
+        function updateDeviceInfo(data) {
+            $('infoDeviceName').textContent = data.name || 'Unknown';
+            $('infoBrowser').textContent = data.browser ? data.browser.split(' ').slice(0,2).join(' ') : 'Unknown';
+            $('infoScreen').textContent = data.screen || 'Unknown';
+            $('deviceInfoText').textContent = data.name || 'Unknown';
+            addLog(`📱 Device info: ${data.name} (${data.screen})`, 'info');
+        }
+
+        // ---------- BATTERY INFO ----------
+        async function setupBatteryInfo() {
+            try {
+                if ('getBattery' in navigator) {
+                    const battery = await navigator.getBattery();
+                    updateBatteryInfo(battery);
+                    
+                    battery.addEventListener('levelchange', () => updateBatteryInfo(battery));
+                    battery.addEventListener('chargingchange', () => updateBatteryInfo(battery));
+                }
+            } catch(e) {}
+        }
+
+        function updateBatteryInfo(battery) {
+            const level = Math.round(battery.level * 100);
+            const charging = battery.charging ? '⚡' : '';
+            $('infoBattery').textContent = `${charging} ${level}%`;
+        }
+
+        // ---------- TOAST ----------
+        function showToast(message, type = 'info') {
+            toast.textContent = message;
+            toast.className = `toast ${type}`;
+            toast.style.display = 'block';
+            clearTimeout(toast._hideTimeout);
+            toast._hideTimeout = setTimeout(() => {
+                toast.style.display = 'none';
+            }, 3000);
+        }
+
+        // ---------- TAB SWITCH ----------
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab').forEach(el => el.classList.remove('active'));
+            
+            document.getElementById(`tab-${tab}`).classList.remove('hidden');
+            document.querySelector(`.tab[onclick="switchTab('${tab}')"]`).classList.add('active');
+        }
+
+        // ---------- SETTINGS ----------
+        function updatePin() {
+            const newPin = $('settingsPin').value;
+            if (newPin.length === 4 && /^\d+$/.test(newPin)) {
+                state.pin = newPin;
+                saveState();
+                addLog(`🔑 PIN updated to: ${newPin}`, 'success');
+                showToast('✅ PIN berhasil diupdate!', 'success');
+            } else {
+                showToast('❌ PIN harus 4 digit angka!', 'error');
+            }
+        }
+
+        function resetAll() {
+            if (confirm('⚠️ Yakin ingin reset semua data? Ini akan menghapus semua pengaturan.')) {
+                localStorage.removeItem('parentalControlState');
+                state.isLocked = false;
+                state.pin = '1234';
+                state.connectionCode = '98006937';
+                state.deviceId = 'PC-' + Math.random().toString(36).substr(2, 8).toUpperCase();
+                state.log = [];
+                lockOverlay.classList.remove('active');
+                updateUI();
+                addLog('🔄 System reset', 'info');
+                showToast('🔄 System direset', 'info');
+                location.reload();
+            }
+        }
+
+        // ---------- LOG ----------
+        function addLog(message, type = 'info') {
+            const entry = {
+                time: new Date().toLocaleTimeString(),
+                message: message,
+                type: type
+            };
+            state.log.unshift(entry);
+            if (state.log.length > 50) state.log.pop();
+            
+            renderLog();
+            saveState();
+        }
+
+        function renderLog() {
+            activityLog.innerHTML = state.log.map(entry => `
+                <div class="text-sm border-b border-white/5 pb-2 ${entry.type === 'warning' ? 'text-yellow-300' : entry.type === 'success' ? 'text-green-300' : 'text-gray-300'}">
+                    <span class="text-gray-500">[${entry.time}]</span> ${entry.message}
+                </div>
+            `).join('');
+        }
+
+        // ---------- CONNECTION DIALOG ----------
+        function showConnectionDialog() {
+            const code = prompt('🔑 Masukkan kode koneksi dari orang tua:');
+            if (code) {
+                state.connectionCode = code;
+                connectToParent(code);
+            }
+        }
+
+        // ---------- KEYBOARD SHORTCUTS ----------
+        document.addEventListener('keydown', (e) => {
+            if (state.isLocked) {
+                if (e.key >= '0' && e.key <= '9') {
+                    pressPin(parseInt(e.key));
+                } else if (e.key === 'Backspace') {
+                    clearPin();
+                } else if (e.key === 'Enter') {
+                    submitPin();
+                }
+            }
+        });
+
+        // ===== INIT =====
+        window.onload = init;
+
+        // ===== EXPOSE FOR CHILD MODE =====
+        window.connectToParent = connectToParent;
+        window.requestCameraAccess = requestCameraAccess;
+    </script>
+</body>
+  </html>
